@@ -1,0 +1,17 @@
+# Python / Credenciais
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Apache Airflow
+airflow/logs/
+airflow/airflow-webserver.pid
+
+# Terraform (Infra as Code)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# SO
+.DS_Store
