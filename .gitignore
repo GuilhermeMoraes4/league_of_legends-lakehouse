@@ -7,6 +7,7 @@ __pycache__/
 # Apache Airflow
 airflow/logs/
 airflow/airflow-webserver.pid
+airflow/config/*.cfg
 
 # Terraform (Infra as Code)
 .terraform/
