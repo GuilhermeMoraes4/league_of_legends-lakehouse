@@ -2,7 +2,8 @@
 An automated, cloud-native Data Engineering platform built to extract, process, and analyze League of Legends competitive match data (CBLOL).
 
 ## 🏗️ Architecture
-*(Insira a imagem do seu diagrama aqui)*
+
+<img width="2586" height="1030" alt="project_diagram_lol_lakehouse" src="https://github.com/user-attachments/assets/d95d0452-6605-4dd0-b8fa-c4620ce73f5a" />
 
 ## 🛠️ Tech Stack
 * **Infrastructure as Code:** Terraform
