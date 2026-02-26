@@ -5,6 +5,13 @@ terraform {
       version = "~> 3.0"
     }
   }
+
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "sttfstategui"
+    container_name       = "tfstate"
+    key                  = "lol-lakehouse.tfstate"
+  }
 }
 
 provider "azurerm"{
@@ -45,8 +52,12 @@ resource "azurerm_storage_data_lake_gen2_filesystem" "gold" {
 
 # 4. Processamento (Spark)
 resource "azurerm_databricks_workspace" "dbw" {
-  name                        = "dbw-lol-lakehouse-dev"
-  resource_group_name         = azurerm_resource_group.rg.name
-  location                    = azurerm_resource_group.rg.location
-  sku                         = "standard"
+  name                = "dbw-lol-lakehouse-dev"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  sku                 = "standard"
+
+  custom_parameters {
+    no_public_ip = false
+  }
 }
