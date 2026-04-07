@@ -193,6 +193,63 @@ def extract_match_details(
     return success_count
 
 
+def extract_timelines(
+    client: RiotAPIClient,
+    match_ids: list[str],
+    execution_date: str = None,
+) -> int:
+    """
+    Para cada match ID, busca a timeline e salva no bronze layer.
+    Pula timelines que ja foram extraidas (idempotencia independente do match detail).
+
+    Returns:
+        Quantidade de timelines extraidas com sucesso
+    """
+    if execution_date is None:
+        execution_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    timelines_dir = os.path.join(BASE_OUTPUT_DIR, "timelines", f"dt={execution_date}")
+    os.makedirs(timelines_dir, exist_ok=True)
+
+    success_count = 0
+    skip_count = 0
+    fail_count = 0
+
+    total = len(match_ids)
+    logger.info("Iniciando extracao de timelines para %d partidas.", total)
+
+    for idx, match_id in enumerate(match_ids, 1):
+        timeline_path = os.path.join(timelines_dir, f"{match_id}_timeline.json")
+        if os.path.exists(timeline_path):
+            skip_count += 1
+            continue
+
+        url = f"{REGIONAL_URL}/lol/match/v5/matches/{match_id}/timeline"
+        timeline_data = client.get(url)
+
+        if timeline_data:
+            with open(timeline_path, "w", encoding="utf-8") as f:
+                json.dump(timeline_data, f, ensure_ascii=False)
+            success_count += 1
+
+            if idx % 10 == 0 or idx == total:
+                logger.info(
+                    "Timelines: %d/%d (sucesso=%d, skip=%d, falha=%d)",
+                    idx, total, success_count, skip_count, fail_count
+                )
+        else:
+            fail_count += 1
+            logger.warning("Falha ao extrair timeline %s (%d/%d)", match_id, idx, total)
+
+    logger.info(
+        "Extracao de timelines finalizada. "
+        "Sucesso: %d | Ja existiam: %d | Falha: %d",
+        success_count, skip_count, fail_count
+    )
+
+    return success_count
+
+
 def _save_match_ids(
     unique_ids: list[str],
     player_match_map: dict,

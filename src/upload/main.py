@@ -1,9 +1,9 @@
 """
-Entry point para upload de dados bronze para o DBFS (Databricks Community Edition).
+Entry point para upload e carregamento de dados bronze no Databricks.
 Chamado pelo Airflow via TaskFlow API ou diretamente via CLI.
 
 Uso:
-    python -m src.upload.main --date 2026-04-04
+    python -m src.upload.main --date 2026-04-07
 """
 
 import argparse
@@ -18,7 +18,7 @@ logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("dbfs_upload")
+logger = logging.getLogger("databricks_loader")
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="Upload de dados bronze para o DBFS (Databricks Community Edition)."
+        description="Upload e carregamento de dados bronze no Databricks."
     )
     parser.add_argument(
         "--date",
@@ -42,9 +42,12 @@ def main():
         logger.error("Formato de data invalido: %s. Use YYYY-MM-DD.", args.date)
         sys.exit(1)
 
-    logger.info("Iniciando upload para DBFS — data: %s", args.date)
-    uploaded = upload_bronze(args.date)
-    logger.info("Upload concluido. Total de arquivos enviados: %d", uploaded)
+    logger.info("Iniciando upload e carregamento — data: %s", args.date)
+    uploaded, tables = upload_bronze(args.date)
+    logger.info(
+        "Concluido. Arquivos enviados: %d | Tabelas carregadas: %d",
+        uploaded, tables,
+    )
 
 
 if __name__ == "__main__":

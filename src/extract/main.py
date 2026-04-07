@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 from src.extract.config import BASE_OUTPUT_DIR, get_api_key
 from src.extract.extract_accounts import extract_accounts, load_accounts
-from src.extract.extract_matches import extract_match_details, extract_match_ids, load_match_ids
+from src.extract.extract_matches import extract_match_details, extract_match_ids, extract_timelines, load_match_ids
 from src.extract.riot_api_client import RiotAPIClient
 
 logging.basicConfig(
@@ -148,6 +148,32 @@ def step_match_details(execution_date, include_timeline=False, client=None):
     return extracted
 
 
+def step_timelines(execution_date, client=None):
+    """STEP 4: Baixar timelines de cada partida (independente do match detail)."""
+    logger.info("[STEP 4] Extraindo timelines das partidas (Match-V5)...")
+
+    match_ids = load_match_ids(execution_date)
+    if not match_ids:
+        logger.warning(
+            "Nenhum match ID encontrado para %s. "
+            "Execute o step 'match-ids' antes.", execution_date
+        )
+        return 0
+
+    owns_client = client is None
+    if owns_client:
+        client = _validate_and_create_client()
+
+    try:
+        extracted = extract_timelines(client, match_ids, execution_date)
+    finally:
+        if owns_client:
+            client.close()
+
+    logger.info("Timelines extraidas nesta execucao: %d", extracted)
+    return extracted
+
+
 def run_pipeline(execution_date, include_timeline=False):
     """Executa o pipeline completo com um unico client (1 health check, nao 3)."""
     logger.info("=" * 70)
@@ -160,7 +186,9 @@ def run_pipeline(execution_date, include_timeline=False):
     with _validate_and_create_client() as client:
         step_accounts(execution_date, client)
         step_match_ids(execution_date, client)
-        step_match_details(execution_date, include_timeline, client)
+        step_match_details(execution_date, False, client)
+        if include_timeline:
+            step_timelines(execution_date, client)
 
     logger.info("=" * 70)
     logger.info("PIPELINE FINALIZADO")

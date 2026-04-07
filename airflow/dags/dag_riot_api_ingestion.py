@@ -1,7 +1,7 @@
 """
 DAG de ingestao da Riot Games API usando TaskFlow API.
 
-Flow: extract_accounts >> extract_match_ids >> extract_match_details >> upload_to_dbfs
+Flow: extract_accounts >> extract_match_ids >> extract_match_details >> extract_timelines >> load_to_databricks
 
 Cada task importa a funcao Python diretamente (sem BashOperator).
 """
@@ -41,7 +41,7 @@ default_args = {
 @dag(
     dag_id="riot_api_ingestion",
     default_args=default_args,
-    description="Extracao de dados da Riot Games API e upload para Databricks DBFS",
+    description="Extracao da Riot Games API e carregamento em Delta tables no Databricks",
     schedule="@daily",
     start_date=datetime(2026, 2, 25),
     catchup=False,
@@ -68,12 +68,18 @@ def riot_api_ingestion():
         step_match_details(_get_ds(**kwargs))
 
     @task
-    def upload_to_dbfs(**kwargs):
+    def extract_timelines(**kwargs):
+        _ensure_pythonpath()
+        from src.extract.main import step_timelines
+        step_timelines(_get_ds(**kwargs))
+
+    @task
+    def load_to_databricks(**kwargs):
         _ensure_pythonpath()
         from src.upload.upload_bronze import upload_bronze
         upload_bronze(_get_ds(**kwargs))
 
-    extract_accounts() >> extract_match_ids() >> extract_match_details() >> upload_to_dbfs()
+    extract_accounts() >> extract_match_ids() >> extract_match_details() >> extract_timelines() >> load_to_databricks()
 
 
 riot_api_ingestion()
