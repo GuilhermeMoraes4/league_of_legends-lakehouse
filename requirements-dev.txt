@@ -1,0 +1,8 @@
+# Instalar com: pip install -e ".[dev]"
+# Ou: pip install -r requirements-dev.txt
+pytest>=8.0
+pytest-mock>=3.12
+responses>=0.25
+ruff>=0.4
+mypy>=1.10
+pre-commit>=3.7

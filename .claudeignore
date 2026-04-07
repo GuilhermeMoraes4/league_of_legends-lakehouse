@@ -1,0 +1,35 @@
+# Ambientes virtuais
+.venv/
+venv/
+
+# Airflow runtime
+airflow/logs/
+airflow/airflow-webserver.pid
+logs/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+infra/.terraform.lock.hcl
+
+# Data (bronze layer pode ser gigante)
+data/bronze/matches/
+data/bronze/timelines/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+postgres-db-volume/
+
+# Segredos
+.env

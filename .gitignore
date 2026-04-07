@@ -10,10 +10,21 @@ airflow/logs/
 airflow/airflow-webserver.pid
 airflow/config/*.cfg
 
-# Terraform (Infra as Code)
-.terraform/
-*.tfstate
-*.tfstate.backup
-
 # SO
 .DS_Store
+*:Zone.Identifier
+*Zone.Identifier
+
+# IDE / Claude Code
+.vscode/
+.claude/settings.local.json
+
+# Data (bronze layer pode ser grande)
+data/
+
+# Egg info (packaging)
+*.egg-info/
+dist/
+build/
+
+.databricks
