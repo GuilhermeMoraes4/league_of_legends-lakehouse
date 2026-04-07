@@ -23,7 +23,7 @@ Pipeline end-to-end de Data Engineering para analytics do CBLOL. Extrai dados da
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Orquestracao | Apache Airflow 3.x (Docker Compose, CeleryExecutor) |
+| Orquestração | Apache Airflow 3.x (Docker Compose, CeleryExecutor) |
 | Processamento | PySpark + Delta Lake (Databricks Community Edition) |
 | Storage | Unity Catalog Volumes (bronze JSON) + Delta Tables (silver/gold) |
 | Linguagem | Python 3.12 |
@@ -31,12 +31,12 @@ Pipeline end-to-end de Data Engineering para analytics do CBLOL. Extrai dados da
 
 ## Setup local
 
-### Pre-requisitos
+### Pré-requisitos
 - Docker + Docker Desktop
 - Python 3.12
 - Conta no [Databricks Community Edition](https://community.cloud.databricks.com/) (gratuito)
 
-### 1. Configurar variaveis de ambiente
+### 1. Configurar variáveis de ambiente
 
 ```bash
 cp airflow/.env.example airflow/.env
@@ -50,12 +50,12 @@ cp airflow/.env.example airflow/.env
 ### 2. Buildar a imagem e subir o Airflow
 
 ```bash
-make build          # Builda a imagem com as dependencias
+make build          # Builda a imagem com as dependências
 make up             # Sobe os containers (inclui clock-sync para WSL2)
 # Aguardar ~2 min. UI em http://localhost:8080 (airflow/airflow)
 ```
 
-### 3. Instalar dependencias de desenvolvimento
+### 3. Instalar dependências de desenvolvimento
 
 ```bash
 make install-dev        # pip install -e ".[dev]"
@@ -71,7 +71,7 @@ make test
 ### 5. Pipeline manual (sem Airflow)
 
 ```bash
-# Extracao completa
+# Extração completa
 python -m src.extract.main --date 2026-04-06
 
 # Steps individuais
@@ -80,7 +80,7 @@ python -m src.extract.main match-ids --date 2026-04-06
 python -m src.extract.main match-details --date 2026-04-06
 ```
 
-## Estrutura de diretorios
+## Estrutura de diretórios
 
 ```
 lol-lakehouse/
@@ -91,54 +91,54 @@ lol-lakehouse/
 |   +-- .env                  # Secrets -- gitignored, copiar de .env.example
 |   +-- .env.example          # Template sem secrets
 +-- src/
-|   +-- extract/              # Pipeline de extracao da Riot API
+|   +-- extract/              # Pipeline de extração da Riot API
 |   +-- upload/               # Upload bronze local -> Databricks UC Volumes
-+-- tests/unit/               # Testes unitarios (pytest + responses)
++-- tests/unit/               # Testes unitários (pytest + responses)
 +-- data/                     # Bronze layer local (gitignored)
-+-- Makefile                  # Comandos utilitarios
++-- Makefile                  # Comandos utilitários
 +-- pyproject.toml            # Packaging e config de ferramentas (ruff, mypy, pytest)
 ```
 
-## DAG — Fluxo de execucao (TaskFlow API)
+## DAG — Fluxo de execução (TaskFlow API)
 
 ```
 extract_accounts >> extract_match_ids >> extract_match_details >> upload_to_dbfs
 ```
 
-| Task | Descricao | Duracao tipica |
+| Task | Descrição | Duração típica |
 |------|-----------|----------------|
 | `extract_accounts` | Resolve Riot IDs -> PUUIDs via Account-V1 (40 jogadores) | ~55s |
 | `extract_match_ids` | Coleta match IDs por jogador via Match-V5 | ~40s |
 | `extract_match_details` | Baixa detalhes de cada partida via Match-V5 (~200 partidas) | ~5min |
 | `upload_to_dbfs` | Envia JSONs para Databricks UC Volumes (Files API) | ~3-4min |
 
-O upload eh graceful: se `DATABRICKS_HOST` ou `DATABRICKS_TOKEN` nao estiverem configurados, a task passa sem erro (os dados ficam apenas locais).
+O upload é graceful: se `DATABRICKS_HOST` ou `DATABRICKS_TOKEN` não estiverem configurados, a task passa sem erro (os dados ficam apenas locais).
 
 ## CBLOL 2026 — Times monitorados
 
-8 times, 40 jogadores: FURIA, LOUD, paiN Gaming, RED Canids, Keyd Stars, Fluxo W7M, Leviatan, LOS.
+8 times, 43 jogadores: FURIA, LOUD, paiN Gaming, RED Canids, Keyd Stars, Fluxo W7M, Leviatan, LOS.
 Roster completo em `src/extract/config.py`.
 
 ## Fases do projeto
 
-| Fase | Status | Descricao |
+| Fase | Status | Descrição |
 |------|--------|-----------|
-| 1 | Concluida | Infra inicial (migrada para Databricks CE gratuito) |
-| 2 | Concluida | Airflow dockerizado, DAG skeleton |
-| 3 | Concluida | Extracao Riot API + upload Databricks + integracao na DAG |
+| 1 | Concluída | Infra inicial (migrada para Databricks CE gratuito) |
+| 2 | Concluída | Airflow dockerizado, DAG skeleton |
+| 3 | Concluída | Extração Riot API + upload Databricks + integração na DAG |
 | 4 | Pendente | Processamento PySpark no Databricks CE (bronze -> silver -> gold) |
 | 5 | Pendente | Dashboard de analytics |
 
-## Decisoes tecnicas
+## Decisões técnicas
 
-- **Unity Catalog Volumes** em vez de DBFS: o Databricks desabilitou o DBFS publico por seguranca. Upload via Files API (`PUT /api/2.0/fs/files/Volumes/...`)
+- **Unity Catalog Volumes** em vez de DBFS: o Databricks desabilitou o DBFS publico por segurança. Upload via Files API (`PUT /api/2.0/fs/files/Volumes/...`)
 - **Clock-sync sidecar**: container `chrony` privilegiado no docker-compose que sincroniza o clock do kernel a cada 30s. Resolve o clock drift do WSL2 que quebra JWT interno do Airflow 3.x
 - **`time.monotonic()`** no rate limiter: imune a ajustes de clock causados pelo NTP sync
 - **Rate limiting conservador**: 1 request/1.3s (~46/min), bem abaixo do limite da dev key (100/2min)
-- **Idempotencia**: match details e uploads nao sao reprocessados se ja existem
+- **Idempotência**: match details e uploads não são reprocessados se ja existem
 - **Airflow 3.x compat**: helper `_get_ds()` na DAG para obter execution date (ds removido em runs manuais)
 
-## Comandos uteis
+## Comandos úteis
 
 ```bash
 make build       # Builda a imagem Docker (rodar 1x ou quando mudar requirements)
@@ -159,5 +159,5 @@ make lint        # Lint com ruff
    DATABRICKS_TOKEN=dapi-seu-token-aqui
    ```
 4. Criar o volume no Databricks (1x): no SQL Editor, rodar `CREATE VOLUME workspace.default.bronze`
-5. Os dados bronze serao enviados automaticamente para `workspace.default.bronze/` via Files API
+5. Os dados bronze serão enviados automaticamente para `workspace.default.bronze/` via Files API
 6. Para processar silver/gold: ligar o cluster, rodar os notebooks
