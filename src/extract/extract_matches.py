@@ -89,7 +89,6 @@ def extract_match_ids(
 
     unique_ids = sorted(all_match_ids)
 
-    # Salvar mapeamento jogador->partidas no bronze
     _save_match_ids(unique_ids, player_match_map, execution_date)
 
     logger.info(

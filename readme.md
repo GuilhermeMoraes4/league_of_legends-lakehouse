@@ -1,6 +1,6 @@
 # League of Legends Lakehouse — CBLOL Analytics
 
-Pipeline end-to-end de Data Engineering para analytics do CBLOL. Extrai dados da Riot Games API, processa via arquitetura medallion (Bronze/Silver/Gold) e serve dashboards de performance de jogadores profissionais.
+Pipeline end-to-end de Data Engineering para analytics de desempenho individual dos jogadores profissionais do CBLOL na Solo Queue. Extrai dados da Riot Games API (partidas ranked dos pros), processa via arquitetura medallion (Bronze/Silver/Gold) e serve dashboards com métricas como champion pool, KDA, CS/min, win rate por campeão e tendência de forma.
 
 ## Architecture
 
@@ -107,8 +107,8 @@ extract_accounts >> extract_match_ids >> extract_match_details >> upload_to_dbfs
 
 | Task | Descrição | Duração típica |
 |------|-----------|----------------|
-| `extract_accounts` | Resolve Riot IDs -> PUUIDs via Account-V1 (40 jogadores) | ~55s |
-| `extract_match_ids` | Coleta match IDs por jogador via Match-V5 | ~40s |
+| `extract_accounts` | Resolve Riot IDs -> PUUIDs via Account-V1 (43 jogadores) | ~55s |
+| `extract_match_ids` | Coleta match IDs ranked solo por jogador via Match-V5 | ~40s |
 | `extract_match_details` | Baixa detalhes de cada partida via Match-V5 (~200 partidas) | ~5min |
 | `upload_to_dbfs` | Envia JSONs para Databricks UC Volumes (Files API) | ~3-4min |
 
@@ -119,6 +119,17 @@ O upload é graceful: se `DATABRICKS_HOST` ou `DATABRICKS_TOKEN` não estiverem 
 8 times, 43 jogadores: FURIA, LOUD, paiN Gaming, RED Canids, Keyd Stars, Fluxo W7M, Leviatan, LOS.
 Roster completo em `src/extract/config.py`.
 
+## Objetivo de analytics
+
+Analisar o desempenho individual dos jogadores profissionais do CBLOL na Solo Queue (Ranked Solo/Duo, queue 420). As partidas competitivas oficiais não são acessíveis via API pública (requerem Tournament API com aprovação da Riot), então o foco é na solo queue como proxy de skill individual.
+
+Métricas planejadas para as camadas silver/gold:
+- **Champion pool:** picks mais jogados por jogador, win rate por campeão
+- **Performance individual:** KDA, CS/min, damage share, vision score, gold diff@15
+- **Comparativo por role:** ranking entre tops, mids, adcs, etc.
+- **Tendência/forma:** desempenho nos últimos N jogos
+- **Meta do high elo BR:** campeões priorizados pelos pros
+
 ## Fases do projeto
 
 | Fase | Status | Descrição |
@@ -127,7 +138,7 @@ Roster completo em `src/extract/config.py`.
 | 2 | Concluída | Airflow dockerizado, DAG skeleton |
 | 3 | Concluída | Extração Riot API + upload Databricks + integração na DAG |
 | 4 | Pendente | Processamento PySpark no Databricks CE (bronze -> silver -> gold) |
-| 5 | Pendente | Dashboard de analytics |
+| 5 | Pendente | Dashboard de analytics (desempenho individual dos pros) |
 
 ## Decisões técnicas
 
