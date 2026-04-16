@@ -294,16 +294,53 @@ df_gold = df_joined.select(...)
 6. gold_player_frames_indexed.py (depende de participant_id)
 7. gold_validation.py (todas as assertions)
 
+## Execucao automatica via SQL Warehouse API
+
+Alem dos notebooks (para execucao manual no Databricks), criar `src/upload/upload_gold.py` que executa os mesmos SQLs remotamente via `DatabricksSQLClient` (mesmo padrao do `upload_bronze.py`).
+
+### Abordagem
+
+Toda a logica gold eh SQL puro (JOINs, window functions, MERGE INTO). Os notebooks PySpark sao wrappers em volta de `spark.sql()`. Portanto, os mesmos SQLs podem ser executados via SQL Statement Execution API, sem precisar abrir o Databricks.
+
+### upload_gold.py — Fluxo
+
+```python
+# 1. Health check do warehouse
+# 2. CREATE SCHEMA IF NOT EXISTS loldata.cblol_gold
+# 3. Silver amend: ALTER TABLE + MERGE INTO para participant_id
+# 4. Para cada tabela gold (na ordem):
+#    a) CREATE TABLE IF NOT EXISTS
+#    b) MERGE INTO com SELECT de transformacao
+# 5. Validacoes (contagens, integridade)
+# 6. Log do resultado
+```
+
+### SQL equivalente para cada tabela
+
+O upload_gold.py deve traduzir a logica dos notebooks em SQL puro executavel via warehouse:
+- JOINs entre tabelas silver
+- Window functions (ROW_NUMBER)
+- LATERAL VIEW posexplode (para bans)
+- CTEs (para champion mapping)
+- MERGE INTO com subquery source
+
+### Timeout
+
+Usar `wait_timeout="50s"` para CREATE/ALTER e `wait_timeout="120s"` para MERGE INTO (queries maiores, especialmente timeline_frames).
+
 ## Arquivos a criar
 
 ```
 databricks/
   silver/
-    silver_match_participants_amend.py   <-- adiciona participant_id
+    silver_match_participants_amend.py   <-- adiciona participant_id (notebook)
   gold/
-    gold_team_stats.py
-    gold_player_performance.py
-    gold_draft.py
-    gold_player_frames_indexed.py
-    gold_validation.py
+    gold_team_stats.py                   <-- notebook
+    gold_player_performance.py           <-- notebook
+    gold_draft.py                        <-- notebook
+    gold_player_frames_indexed.py        <-- notebook
+    gold_validation.py                   <-- notebook
+src/
+  upload/
+    upload_gold.py                       <-- execucao remota via SQL Warehouse API
 ```
