@@ -28,3 +28,10 @@ dist/
 build/
 
 .databricks
+databricks.yml
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+infra/terraform/.terraform/
