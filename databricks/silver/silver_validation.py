@@ -6,7 +6,7 @@
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, count, countDistinct
+from pyspark.sql.functions import col, count
 
 # COMMAND ----------
 
@@ -18,15 +18,11 @@ match_parts      = spark.read.table("loldata.cblol_silver.match_participants")
 timeline_frames  = spark.read.table("loldata.cblol_silver.timeline_frames")
 timeline_events  = spark.read.table("loldata.cblol_silver.timeline_events")
 
-# PKs de referencia (broadcast-friendly)
-match_ids_set = {r.match_id for r in matches.select("match_id").collect()}
-puuid_set     = {r.puuid   for r in accounts.select("puuid").collect()}
-
 erros = []
 
 # COMMAND ----------
 
-# --- Validacao 1: match_teams sem particao orfao em matches ---
+# --- Validacao 1: match_teams sem registro orfao em matches ---
 orphan_teams = match_teams.join(
     matches.select("match_id"), on="match_id", how="left_anti"
 ).count()
@@ -39,7 +35,7 @@ else:
 
 # COMMAND ----------
 
-# --- Validacao 2: match_participants sem particao orfao em matches ---
+# --- Validacao 2: match_participants sem registro orfao em matches ---
 orphan_parts = match_parts.join(
     matches.select("match_id"), on="match_id", how="left_anti"
 ).count()
@@ -65,7 +61,7 @@ else:
 
 # COMMAND ----------
 
-# --- Validacao 4: timeline_frames sem particao orfao em matches ---
+# --- Validacao 4: timeline_frames sem registro orfao em matches ---
 orphan_frames = timeline_frames.join(
     matches.select("match_id"), on="match_id", how="left_anti"
 ).count()
@@ -78,7 +74,7 @@ else:
 
 # COMMAND ----------
 
-# --- Validacao 5: timeline_events sem particao orfao em matches ---
+# --- Validacao 5: timeline_events sem registro orfao em matches ---
 orphan_events = timeline_events.join(
     matches.select("match_id"), on="match_id", how="left_anti"
 ).count()
@@ -92,16 +88,13 @@ else:
 # COMMAND ----------
 
 # --- Validacao 6: cada partida deve ter exatamente 10 participantes ---
-counts_per_match = (
-    match_parts.groupBy("match_id")
-    .agg(count("puuid").alias("n_participants"))
+counts_per_match = match_parts.groupBy("match_id").agg(
+    count("puuid").alias("n_participants")
 )
 wrong_count = counts_per_match.filter(col("n_participants") != 10).count()
 if wrong_count > 0:
     samples = (
-        counts_per_match.filter(col("n_participants") != 10)
-        .limit(5)
-        .collect()
+        counts_per_match.filter(col("n_participants") != 10).limit(5).collect()
     )
     erros.append(
         f"FALHA V6: {wrong_count} partidas sem exatamente 10 participantes. "
@@ -114,16 +107,13 @@ else:
 # COMMAND ----------
 
 # --- Validacao 7: cada partida deve ter exatamente 2 times ---
-counts_teams = (
-    match_teams.groupBy("match_id")
-    .agg(count("team_id").alias("n_teams"))
+counts_teams = match_teams.groupBy("match_id").agg(
+    count("team_id").alias("n_teams")
 )
 wrong_teams = counts_teams.filter(col("n_teams") != 2).count()
 if wrong_teams > 0:
     samples = (
-        counts_teams.filter(col("n_teams") != 2)
-        .limit(5)
-        .collect()
+        counts_teams.filter(col("n_teams") != 2).limit(5).collect()
     )
     erros.append(
         f"FALHA V7: {wrong_teams} partidas sem exatamente 2 times. "
@@ -137,12 +127,12 @@ else:
 
 # Sumario final
 print("\n--- SUMARIO DE VALIDACAO SILVER ---")
-print(f"accounts        : {accounts.count()} linhas")
-print(f"matches         : {matches.count()} linhas")
-print(f"match_teams     : {match_teams.count()} linhas")
+print(f"accounts           : {accounts.count()} linhas")
+print(f"matches            : {matches.count()} linhas")
+print(f"match_teams        : {match_teams.count()} linhas")
 print(f"match_participants : {match_parts.count()} linhas")
-print(f"timeline_frames : {timeline_frames.count()} linhas")
-print(f"timeline_events : {timeline_events.count()} linhas")
+print(f"timeline_frames    : {timeline_frames.count()} linhas")
+print(f"timeline_events    : {timeline_events.count()} linhas")
 
 if erros:
     print(f"\n{len(erros)} FALHA(S) ENCONTRADA(S):")

@@ -40,8 +40,8 @@ Todas as tabelas bronze tem 2 colunas:
 - `puuid` (STRING, PK)
 - `game_name` (STRING)
 - `tag_line` (STRING)
-- `summoner_level` (INT)
-- `profile_icon_id` (INT)
+- `team` (STRING) — time CBLOL (ex: FURIA, LOUD)
+- `role` (STRING) — posicao no time (top, jng, mid, adc, sup)
 - `extraction_date` (DATE)
 
 ### 2. matches

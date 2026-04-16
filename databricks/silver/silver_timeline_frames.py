@@ -5,7 +5,9 @@
 # PK       : match_id + participant_id + timestamp_ms
 # Descricao: Explode os frames de timeline por jogador por minuto.
 #            Cada frame possui posicao, ouro, XP, nivel e minions de cada
-#            participante. O campo minute e calculado como floor(timestamp_ms / 60000).
+#            participante. O campo minute eh calculado como floor(timestamp_ms / 60000).
+#            participantFrames eh um MAP<STRING, STRUCT> onde as chaves sao
+#            "1", "2", ..., "10" (participant IDs como string).
 
 # COMMAND ----------
 
@@ -66,7 +68,11 @@ schema_info = StructType(
 # Schema raiz do JSON de timeline (Match-V5 timeline)
 schema_timeline = StructType(
     [
-        StructField("metadata", StructType([StructField("matchId", StringType(), True)]), True),
+        StructField(
+            "metadata",
+            StructType([StructField("matchId", StringType(), True)]),
+            True,
+        ),
         StructField("info", schema_info, True),
     ]
 )
@@ -194,14 +200,18 @@ null_match_id = df_final.filter(col("match_id").isNull()).count()
 assert null_match_id == 0, f"FALHA: {null_match_id} linhas com match_id nulo"
 
 null_participant_id = df_final.filter(col("participant_id").isNull()).count()
-assert null_participant_id == 0, f"FALHA: {null_participant_id} linhas com participant_id nulo"
+assert null_participant_id == 0, (
+    f"FALHA: {null_participant_id} linhas com participant_id nulo"
+)
 
 null_timestamp = df_final.filter(col("timestamp_ms").isNull()).count()
 assert null_timestamp == 0, f"FALHA: {null_timestamp} linhas com timestamp_ms nulo"
 
 # Sem duplicatas na PK composta (match_id, participant_id, timestamp_ms)
 total = df_final.count()
-distinct = df_final.select("match_id", "participant_id", "timestamp_ms").distinct().count()
+distinct = (
+    df_final.select("match_id", "participant_id", "timestamp_ms").distinct().count()
+)
 assert total == distinct, (
     f"FALHA: duplicatas em timeline_frames (total={total}, distinct={distinct})"
 )

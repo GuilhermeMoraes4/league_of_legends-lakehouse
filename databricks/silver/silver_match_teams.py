@@ -9,12 +9,11 @@
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, expr, explode, from_json, transform
+from pyspark.sql.functions import col, expr, explode, from_json
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
     IntegerType,
-    LongType,
     StringType,
     StructField,
     StructType,
@@ -22,7 +21,7 @@ from pyspark.sql.types import (
 
 # COMMAND ----------
 
-# Sub-schemas reutilizados
+# Sub-schemas dos objetivos de cada time
 schema_objective = StructType(
     [
         StructField("first", BooleanType(), True),
@@ -47,19 +46,13 @@ schema_ban = StructType(
     ]
 )
 
+# Schema de cada time dentro de info.teams[]
 schema_team = StructType(
     [
         StructField("teamId", IntegerType(), True),
         StructField("win", BooleanType(), True),
         StructField("objectives", schema_objectives, True),
         StructField("bans", ArrayType(schema_ban), True),
-    ]
-)
-
-# Schema minimo de participante (ignorado neste notebook)
-schema_participant_stub = StructType(
-    [
-        StructField("puuid", StringType(), True),
     ]
 )
 

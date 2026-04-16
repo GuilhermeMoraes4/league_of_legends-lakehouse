@@ -4,9 +4,9 @@
 # Destino  : loldata.cblol_silver.timeline_events
 # PK       : match_id + timestamp_ms + event_index
 # Descricao: Explode os eventos de cada frame da timeline.
-#            event_index e o indice do evento dentro do seu frame, necessario
+#            event_index eh o indice do evento dentro do seu frame, necessario
 #            para unicidade pois multiplos eventos podem ter o mesmo timestamp_ms.
-#            O campo minute e calculado como floor(timestamp_ms / 60000).
+#            O campo minute eh calculado como floor(timestamp_ms / 60000).
 
 # COMMAND ----------
 
@@ -65,7 +65,11 @@ schema_info = StructType(
 # Schema raiz do JSON de timeline (Match-V5 timeline)
 schema_timeline = StructType(
     [
-        StructField("metadata", StructType([StructField("matchId", StringType(), True)]), True),
+        StructField(
+            "metadata",
+            StructType([StructField("matchId", StringType(), True)]),
+            True,
+        ),
         StructField("info", schema_info, True),
     ]
 )
@@ -200,7 +204,9 @@ assert null_timestamp == 0, f"FALHA: {null_timestamp} linhas com timestamp_ms nu
 
 # Sem duplicatas na PK composta (match_id, timestamp_ms, event_index)
 total = df_final.count()
-distinct = df_final.select("match_id", "timestamp_ms", "event_index").distinct().count()
+distinct = (
+    df_final.select("match_id", "timestamp_ms", "event_index").distinct().count()
+)
 assert total == distinct, (
     f"FALHA: duplicatas em timeline_events (total={total}, distinct={distinct})"
 )

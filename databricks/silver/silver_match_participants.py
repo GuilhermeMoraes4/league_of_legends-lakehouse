@@ -8,7 +8,7 @@
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, expr, explode, from_json, greatest, lit
+from pyspark.sql.functions import col, explode, from_json, greatest, lit
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
