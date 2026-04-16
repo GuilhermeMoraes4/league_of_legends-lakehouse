@@ -10,7 +10,7 @@
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, explode, floor, from_json, posexplode
+from pyspark.sql.functions import col, explode, floor, from_json, posexplode, row_number
 from pyspark.sql.types import (
     ArrayType,
     IntegerType,
@@ -19,6 +19,7 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
+from pyspark.sql.window import Window
 
 # COMMAND ----------
 
@@ -147,6 +148,10 @@ spark.sql(
 # COMMAND ----------
 
 # View temporaria para o MERGE
+# Deduplicacao: manter apenas a extracao mais recente por PK
+window_dedup = Window.partitionBy("match_id", "timestamp_ms", "event_index").orderBy(col("extraction_date").desc())
+df_silver = df_silver.withColumn("rn", row_number().over(window_dedup)).filter(col("rn") == 1).drop("rn")
+
 df_silver.createOrReplaceTempView("timeline_events_updates")
 
 # MERGE idempotente: upsert por (match_id, timestamp_ms, event_index)
