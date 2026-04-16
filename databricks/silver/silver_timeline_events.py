@@ -1,0 +1,212 @@
+# Databricks notebook source
+# Notebook : silver_timeline_events
+# Origem   : loldata.cblol_bronze.timelines  (frames[].events[])
+# Destino  : loldata.cblol_silver.timeline_events
+# PK       : match_id + timestamp_ms + event_index
+# Descricao: Explode os eventos de cada frame da timeline.
+#            event_index e o indice do evento dentro do seu frame, necessario
+#            para unicidade pois multiplos eventos podem ter o mesmo timestamp_ms.
+#            O campo minute e calculado como floor(timestamp_ms / 60000).
+
+# COMMAND ----------
+
+from pyspark.sql.functions import col, explode, floor, from_json, posexplode
+from pyspark.sql.types import (
+    ArrayType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
+# COMMAND ----------
+
+# Schema de cada evento dentro de frames[].events[]
+# Campos opcionais variam por tipo de evento (CHAMPION_KILL, ITEM_PURCHASED, etc.)
+schema_event = StructType(
+    [
+        StructField("timestamp", LongType(), True),
+        StructField("type", StringType(), True),
+        StructField("killerId", IntegerType(), True),
+        StructField("victimId", IntegerType(), True),
+        StructField("assistingParticipantIds", ArrayType(IntegerType()), True),
+        StructField(
+            "position",
+            StructType(
+                [
+                    StructField("x", IntegerType(), True),
+                    StructField("y", IntegerType(), True),
+                ]
+            ),
+            True,
+        ),
+        StructField("itemId", IntegerType(), True),
+        StructField("wardType", StringType(), True),
+        StructField("buildingType", StringType(), True),
+    ]
+)
+
+# Schema de cada frame (um por minuto)
+schema_frame = StructType(
+    [
+        StructField("timestamp", LongType(), True),
+        StructField("events", ArrayType(schema_event), True),
+    ]
+)
+
+# Schema do campo info dentro do JSON de timeline
+schema_info = StructType(
+    [
+        StructField("frames", ArrayType(schema_frame), True),
+    ]
+)
+
+# Schema raiz do JSON de timeline (Match-V5 timeline)
+schema_timeline = StructType(
+    [
+        StructField("metadata", StructType([StructField("matchId", StringType(), True)]), True),
+        StructField("info", schema_info, True),
+    ]
+)
+
+# COMMAND ----------
+
+# Leitura da camada bronze
+df_bronze = spark.read.table("loldata.cblol_bronze.timelines")
+
+# Parse do JSON com schema explicito
+df_parsed = df_bronze.withColumn("data", from_json(col("raw_json"), schema_timeline))
+
+# Explode dos frames: 1 linha por frame (1 por minuto) por partida
+df_frames = df_parsed.select(
+    col("data.metadata.matchId").alias("match_id"),
+    explode(col("data.info.frames")).alias("frame"),
+    col("extraction_date"),
+).filter(col("match_id").isNotNull())
+
+# Explode dos eventos com posicao (posexplode preserva o indice dentro do array)
+# event_index garante unicidade para eventos com mesmo timestamp_ms
+df_events = df_frames.select(
+    col("match_id"),
+    posexplode(col("frame.events")).alias("event_index", "event"),
+    col("extraction_date"),
+)
+
+# Selecao dos campos finais e calculo do minute
+df_silver = df_events.select(
+    col("match_id"),
+    col("event.timestamp").alias("timestamp_ms"),
+    col("event_index"),
+    floor(col("event.timestamp") / 60000).cast(IntegerType()).alias("minute"),
+    col("event.type").alias("type"),
+    col("event.killerId").alias("killer_id"),
+    col("event.victimId").alias("victim_id"),
+    col("event.assistingParticipantIds").alias("assisting_participant_ids"),
+    col("event.position.x").alias("position_x"),
+    col("event.position.y").alias("position_y"),
+    col("event.itemId").alias("item_id"),
+    col("event.wardType").alias("ward_type"),
+    col("event.buildingType").alias("building_type"),
+    col("extraction_date"),
+).filter(col("timestamp_ms").isNotNull())
+
+# COMMAND ----------
+
+# Garante que o schema silver existe
+spark.sql("CREATE SCHEMA IF NOT EXISTS loldata.cblol_silver")
+
+# Cria a tabela silver se ainda nao existir
+spark.sql(
+    """
+    CREATE TABLE IF NOT EXISTS loldata.cblol_silver.timeline_events (
+        match_id                        STRING,
+        timestamp_ms                    LONG,
+        event_index                     INT,
+        minute                          INT,
+        type                            STRING,
+        killer_id                       INT,
+        victim_id                       INT,
+        assisting_participant_ids       ARRAY<INT>,
+        position_x                      INT,
+        position_y                      INT,
+        item_id                         INT,
+        ward_type                       STRING,
+        building_type                   STRING,
+        extraction_date                 DATE
+    )
+    USING DELTA
+    COMMENT 'Um registro por evento por partida — eventos da timeline (Match-V5)'
+    """
+)
+
+# COMMAND ----------
+
+# View temporaria para o MERGE
+df_silver.createOrReplaceTempView("timeline_events_updates")
+
+# MERGE idempotente: upsert por (match_id, timestamp_ms, event_index)
+spark.sql(
+    """
+    MERGE INTO loldata.cblol_silver.timeline_events AS target
+    USING timeline_events_updates AS source
+    ON target.match_id     = source.match_id
+    AND target.timestamp_ms = source.timestamp_ms
+    AND target.event_index  = source.event_index
+    WHEN MATCHED THEN
+        UPDATE SET
+            target.minute                     = source.minute,
+            target.type                       = source.type,
+            target.killer_id                  = source.killer_id,
+            target.victim_id                  = source.victim_id,
+            target.assisting_participant_ids  = source.assisting_participant_ids,
+            target.position_x                 = source.position_x,
+            target.position_y                 = source.position_y,
+            target.item_id                    = source.item_id,
+            target.ward_type                  = source.ward_type,
+            target.building_type              = source.building_type,
+            target.extraction_date            = source.extraction_date
+    WHEN NOT MATCHED THEN
+        INSERT (
+            match_id, timestamp_ms, event_index, minute,
+            type, killer_id, victim_id, assisting_participant_ids,
+            position_x, position_y, item_id, ward_type,
+            building_type, extraction_date
+        )
+        VALUES (
+            source.match_id, source.timestamp_ms, source.event_index, source.minute,
+            source.type, source.killer_id, source.victim_id,
+            source.assisting_participant_ids, source.position_x, source.position_y,
+            source.item_id, source.ward_type, source.building_type,
+            source.extraction_date
+        )
+    """
+)
+
+# COMMAND ----------
+
+# Assertions inline — validacao pos-escrita
+df_final = spark.read.table("loldata.cblol_silver.timeline_events")
+
+count = df_final.count()
+assert count > 0, f"FALHA: tabela vazia (count={count})"
+
+# Chaves primarias nunca nulas
+null_match_id = df_final.filter(col("match_id").isNull()).count()
+assert null_match_id == 0, f"FALHA: {null_match_id} linhas com match_id nulo"
+
+null_timestamp = df_final.filter(col("timestamp_ms").isNull()).count()
+assert null_timestamp == 0, f"FALHA: {null_timestamp} linhas com timestamp_ms nulo"
+
+# Sem duplicatas na PK composta (match_id, timestamp_ms, event_index)
+total = df_final.count()
+distinct = df_final.select("match_id", "timestamp_ms", "event_index").distinct().count()
+assert total == distinct, (
+    f"FALHA: duplicatas em timeline_events (total={total}, distinct={distinct})"
+)
+
+# minute nunca negativo
+negative_minute = df_final.filter(col("minute") < 0).count()
+assert negative_minute == 0, f"FALHA: {negative_minute} linhas com minute negativo"
+
+print(f"OK: loldata.cblol_silver.timeline_events — {count} eventos carregados")
