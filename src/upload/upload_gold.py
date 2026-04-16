@@ -63,23 +63,31 @@ def _amend_silver_participant_id(client):
         """
         MERGE INTO loldata.cblol_silver.match_participants t
         USING (
-            SELECT
-                get_json_object(raw_json, '$.metadata.matchId') AS match_id,
-                p.puuid,
-                p.participantId AS participant_id
-            FROM loldata.cblol_bronze.matches
-            LATERAL VIEW explode(
-                from_json(
-                    get_json_object(raw_json, '$.info.participants'),
-                    'ARRAY<STRUCT<participantId:INT, puuid:STRING>>'
-                )
-            ) AS p
+            SELECT match_id, puuid, participant_id
+            FROM (
+                SELECT
+                    get_json_object(raw_json, '$.metadata.matchId') AS match_id,
+                    p.puuid,
+                    p.participantId AS participant_id,
+                    ROW_NUMBER() OVER(
+                        PARTITION BY get_json_object(raw_json, '$.metadata.matchId'), p.puuid
+                        ORDER BY extraction_date DESC
+                    ) AS _rn
+                FROM loldata.cblol_bronze.matches
+                LATERAL VIEW explode(
+                    from_json(
+                        get_json_object(raw_json, '$.info.participants'),
+                        'ARRAY<STRUCT<participantId:INT, puuid:STRING>>'
+                    )
+                ) AS p
+            )
+            WHERE _rn = 1
         ) s
         ON t.match_id = s.match_id AND t.puuid = s.puuid
         WHEN MATCHED AND t.participant_id IS NULL
             THEN UPDATE SET t.participant_id = s.participant_id
         """,
-        wait_timeout="120s",
+        wait_timeout="50s",
     )
     if merge_result:
         logger.info("participant_id populado em silver.match_participants.")
@@ -147,7 +155,7 @@ def _load_gold_team_stats(client):
         WHEN MATCHED THEN UPDATE SET *
         WHEN NOT MATCHED THEN INSERT *
         """,
-        wait_timeout="120s",
+        wait_timeout="50s",
     )
     if merge_result:
         logger.info("gold_team_stats carregada com sucesso.")
@@ -276,7 +284,7 @@ def _load_gold_player_performance(client):
         WHEN MATCHED THEN UPDATE SET *
         WHEN NOT MATCHED THEN INSERT *
         """,
-        wait_timeout="120s",
+        wait_timeout="50s",
     )
     if merge_result:
         logger.info("gold_player_performance carregada com sucesso.")
@@ -307,64 +315,62 @@ def _load_gold_draft(client):
 
     merge_result = client.execute(
         """
+        WITH champion_map AS (
+            SELECT champion_id, FIRST(champion_name) AS champion_name
+            FROM loldata.cblol_silver.match_participants
+            GROUP BY champion_id
+        ),
+        bans_raw AS (
+            SELECT
+                mt.match_id,
+                mt.team_id,
+                CAST(ban_val AS INT) AS champion_id,
+                'ban' AS type,
+                (pos + 1) AS draft_order,
+                mt.extraction_date
+            FROM (
+                SELECT t.match_id, t.team_id, t.bans, t.extraction_date
+                FROM loldata.cblol_silver.match_teams t
+                JOIN loldata.cblol_silver.matches m ON t.match_id = m.match_id
+                WHERE m.game_duration_seconds >= 300
+            ) mt
+            LATERAL VIEW posexplode(mt.bans) AS pos, ban_val
+            WHERE CAST(ban_val AS INT) != -1
+        ),
+        picks_raw AS (
+            SELECT
+                p.match_id,
+                p.team_id,
+                p.champion_id,
+                'pick' AS type,
+                CAST(NULL AS INT) AS draft_order,
+                p.extraction_date
+            FROM loldata.cblol_silver.match_participants p
+            JOIN loldata.cblol_silver.matches m ON p.match_id = m.match_id
+            WHERE m.game_duration_seconds >= 300
+        ),
+        combined AS (
+            SELECT * FROM bans_raw
+            UNION ALL
+            SELECT * FROM picks_raw
+        ),
+        draft_resolved AS (
+            SELECT
+                c.match_id, c.team_id, c.champion_id,
+                COALESCE(cm.champion_name, 'UNKNOWN') AS champion_name,
+                c.type, c.draft_order, c.extraction_date
+            FROM combined c
+            LEFT JOIN champion_map cm ON c.champion_id = cm.champion_id
+        ),
+        draft_deduped AS (
+            SELECT *, ROW_NUMBER() OVER(
+                PARTITION BY match_id, team_id, champion_id, type
+                ORDER BY extraction_date DESC
+            ) AS _rn
+            FROM draft_resolved
+        )
         MERGE INTO loldata.cblol_gold.gold_draft t
-        USING (
-            SELECT * FROM (
-                SELECT *,
-                    ROW_NUMBER() OVER(
-                        PARTITION BY match_id, team_id, champion_id, type
-                        ORDER BY extraction_date DESC
-                    ) AS _rn
-                FROM (
-                    WITH champion_map AS (
-                        SELECT DISTINCT champion_id, FIRST(champion_name) AS champion_name
-                        FROM loldata.cblol_silver.match_participants
-                        GROUP BY champion_id
-                    ),
-                    bans AS (
-                        SELECT
-                            t.match_id,
-                            t.team_id,
-                            CAST(ban_val AS INT) AS champion_id,
-                            'ban' AS type,
-                            (pos + 1) AS draft_order,
-                            t.extraction_date
-                        FROM loldata.cblol_silver.match_teams t
-                        LATERAL VIEW posexplode(t.bans) AS pos, ban_val
-                        JOIN loldata.cblol_silver.matches m ON t.match_id = m.match_id
-                        WHERE CAST(ban_val AS INT) != -1
-                          AND m.game_duration_seconds >= 300
-                    ),
-                    picks AS (
-                        SELECT
-                            p.match_id,
-                            p.team_id,
-                            p.champion_id,
-                            'pick' AS type,
-                            CAST(NULL AS INT) AS draft_order,
-                            p.extraction_date
-                        FROM loldata.cblol_silver.match_participants p
-                        JOIN loldata.cblol_silver.matches m ON p.match_id = m.match_id
-                        WHERE m.game_duration_seconds >= 300
-                    ),
-                    combined AS (
-                        SELECT * FROM bans
-                        UNION ALL
-                        SELECT * FROM picks
-                    )
-                    SELECT
-                        c.match_id,
-                        c.team_id,
-                        c.champion_id,
-                        COALESCE(cm.champion_name, 'UNKNOWN') AS champion_name,
-                        c.type,
-                        c.draft_order,
-                        c.extraction_date
-                    FROM combined c
-                    LEFT JOIN champion_map cm ON c.champion_id = cm.champion_id
-                )
-            ) WHERE _rn = 1
-        ) s
+        USING (SELECT * FROM draft_deduped WHERE _rn = 1) s
         ON t.match_id = s.match_id
            AND t.team_id = s.team_id
            AND t.champion_id = s.champion_id
@@ -372,7 +378,7 @@ def _load_gold_draft(client):
         WHEN MATCHED THEN UPDATE SET *
         WHEN NOT MATCHED THEN INSERT *
         """,
-        wait_timeout="120s",
+        wait_timeout="50s",
     )
     if merge_result:
         logger.info("gold_draft carregada com sucesso.")
@@ -456,7 +462,7 @@ def _load_gold_player_frames_indexed(client):
         WHEN MATCHED THEN UPDATE SET *
         WHEN NOT MATCHED THEN INSERT *
         """,
-        wait_timeout="120s",
+        wait_timeout="50s",
     )
     if merge_result:
         logger.info("gold_player_frames_indexed carregada com sucesso.")
