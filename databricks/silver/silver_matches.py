@@ -5,11 +5,12 @@
 # PK       : match_id
 # Descricao: Extrai campos raiz de cada partida (metadados, duracao, modo,
 #            fila, plataforma e time vencedor). Timestamps convertidos de
-#            epoch ms para TIMESTAMP.
+#            epoch ms para TIMESTAMP. Cada raw_json eh um JSON object unico
+#            (1 match por linha na bronze).
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, expr, from_json
+from pyspark.sql.functions import col, expr, from_json, row_number
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -19,60 +20,22 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
+from pyspark.sql.window import Window
 
 # COMMAND ----------
 
-# Schema do objetivo de cada time (usado dentro de teams[])
-schema_objective = StructType(
-    [
-        StructField("first", BooleanType(), True),
-        StructField("kills", IntegerType(), True),
-    ]
-)
-
-# Schema do ban (usado dentro de teams[].bans[])
-schema_ban = StructType(
-    [
-        StructField("championId", IntegerType(), True),
-        StructField("pickTurn", IntegerType(), True),
-    ]
-)
-
-# Schema dos objetivos de um time
-schema_objectives = StructType(
-    [
-        StructField("baron", schema_objective, True),
-        StructField("dragon", schema_objective, True),
-        StructField("tower", schema_objective, True),
-        StructField("inhibitor", schema_objective, True),
-        StructField("riftHerald", schema_objective, True),
-    ]
-)
-
-# Schema de cada time dentro de info.teams[]
-schema_team = StructType(
+# Schema minimo de time (apenas para derivar winning_team_id)
+schema_team_stub = StructType(
     [
         StructField("teamId", IntegerType(), True),
         StructField("win", BooleanType(), True),
-        StructField("objectives", schema_objectives, True),
-        StructField("bans", ArrayType(schema_ban), True),
-    ]
-)
-
-# Schema minimo de participante (apenas para satisfazer from_json no nivel raiz)
-# O notebook silver_match_participants expande esses campos com detalhe completo
-schema_participant_stub = StructType(
-    [
-        StructField("puuid", StringType(), True),
     ]
 )
 
 # Schema do campo metadata
 schema_metadata = StructType(
     [
-        StructField("dataVersion", StringType(), True),
         StructField("matchId", StringType(), True),
-        StructField("participants", ArrayType(StringType()), True),
     ]
 )
 
@@ -88,7 +51,7 @@ schema_info = StructType(
         StructField("mapId", IntegerType(), True),
         StructField("queueId", IntegerType(), True),
         StructField("platformId", StringType(), True),
-        StructField("teams", ArrayType(schema_team), True),
+        StructField("teams", ArrayType(schema_team_stub), True),
     ]
 )
 
@@ -162,6 +125,10 @@ spark.sql(
 # COMMAND ----------
 
 # View temporaria para o MERGE
+# Deduplicacao: manter apenas a extracao mais recente por PK
+window_dedup = Window.partitionBy("match_id").orderBy(col("extraction_date").desc())
+df_silver = df_silver.withColumn("rn", row_number().over(window_dedup)).filter(col("rn") == 1).drop("rn")
+
 df_silver.createOrReplaceTempView("matches_updates")
 
 # MERGE idempotente: upsert por match_id
@@ -215,7 +182,7 @@ assert total == distinct, (
     f"FALHA: duplicatas em matches (total={total}, distinct={distinct})"
 )
 
-# Timestamps devem estar no intervalo 2020–hoje
+# Timestamps devem estar no intervalo 2020-hoje
 ts_min = df_final.selectExpr("min(game_creation)").collect()[0][0]
 ts_max = df_final.selectExpr("max(game_creation)").collect()[0][0]
 assert ts_min is not None and str(ts_min) >= "2020-01-01", (

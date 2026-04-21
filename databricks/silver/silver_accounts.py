@@ -3,48 +3,59 @@
 # Origem   : loldata.cblol_bronze.accounts
 # Destino  : loldata.cblol_silver.accounts
 # PK       : puuid
-# Descricao: Normaliza contas dos jogadores CBLOL a partir do JSON cru
-#            combinado de Account-V1 e Summoner-V4.
+# Descricao: Normaliza contas dos jogadores CBLOL a partir do JSON cru.
+#            O raw_json eh um JSON ARRAY (um array com ~40 jogadores por extracao),
+#            por isso usa ArrayType + explode para desnormalizar.
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, from_json
+from pyspark.sql.functions import col, explode, from_json, row_number
 from pyspark.sql.types import (
-    StructType,
-    StructField,
+    ArrayType,
     StringType,
-    IntegerType,
-    LongType,
+    StructField,
+    StructType,
 )
+from pyspark.sql.window import Window
 
 # COMMAND ----------
 
-# Schema explicito do JSON cru (Account-V1 + Summoner-V4 mesclados)
-schema_account = StructType(
+# Schema de cada elemento do array JSON
+# O raw_json contem um array de objetos com campos ja em snake_case
+schema_account_element = StructType(
     [
         StructField("puuid", StringType(), True),
-        StructField("gameName", StringType(), True),
-        StructField("tagLine", StringType(), True),
-        StructField("summonerLevel", LongType(), True),
-        StructField("profileIconId", IntegerType(), True),
+        StructField("game_name", StringType(), True),
+        StructField("tag_line", StringType(), True),
+        StructField("team", StringType(), True),
+        StructField("role", StringType(), True),
     ]
 )
+
+# Schema completo: array de accounts
+schema_accounts_array = ArrayType(schema_account_element)
 
 # COMMAND ----------
 
 # Leitura da camada bronze
 df_bronze = spark.read.table("loldata.cblol_bronze.accounts")
 
-# Parse do JSON com schema explicito
-df_parsed = df_bronze.withColumn("data", from_json(col("raw_json"), schema_account))
+# Parse do JSON array com schema explicito
+df_parsed = df_bronze.withColumn("data", from_json(col("raw_json"), schema_accounts_array))
 
-# Selecao e tipagem dos campos finais
-df_silver = df_parsed.select(
-    col("data.puuid").alias("puuid"),
-    col("data.gameName").alias("game_name"),
-    col("data.tagLine").alias("tag_line"),
-    col("data.summonerLevel").cast(IntegerType()).alias("summoner_level"),
-    col("data.profileIconId").alias("profile_icon_id"),
+# Explode do array: 1 linha por jogador por extracao
+df_exploded = df_parsed.select(
+    explode(col("data")).alias("account"),
+    col("extraction_date"),
+)
+
+# Selecao dos campos finais
+df_silver = df_exploded.select(
+    col("account.puuid").alias("puuid"),
+    col("account.game_name").alias("game_name"),
+    col("account.tag_line").alias("tag_line"),
+    col("account.team").alias("team"),
+    col("account.role").alias("role"),
     col("extraction_date"),
 ).filter(col("puuid").isNotNull())
 
@@ -60,21 +71,26 @@ spark.sql(
         puuid            STRING,
         game_name        STRING,
         tag_line         STRING,
-        summoner_level   INT,
-        profile_icon_id  INT,
+        team             STRING,
+        role             STRING,
         extraction_date  DATE
     )
     USING DELTA
-    COMMENT 'Contas dos jogadores CBLOL — Account-V1 + Summoner-V4'
+    COMMENT 'Contas dos jogadores CBLOL — 1 linha por jogador (puuid)'
     """
 )
 
 # COMMAND ----------
 
 # View temporaria para o MERGE
+# Deduplicacao: manter apenas a extracao mais recente por PK
+window_dedup = Window.partitionBy("puuid").orderBy(col("extraction_date").desc())
+df_silver = df_silver.withColumn("rn", row_number().over(window_dedup)).filter(col("rn") == 1).drop("rn")
+
 df_silver.createOrReplaceTempView("accounts_updates")
 
 # MERGE idempotente: upsert por puuid
+# Atualiza todos os campos caso o jogador mude de time ou role entre extracoes
 spark.sql(
     """
     MERGE INTO loldata.cblol_silver.accounts AS target
@@ -84,17 +100,17 @@ spark.sql(
         UPDATE SET
             target.game_name        = source.game_name,
             target.tag_line         = source.tag_line,
-            target.summoner_level   = source.summoner_level,
-            target.profile_icon_id  = source.profile_icon_id,
+            target.team             = source.team,
+            target.role             = source.role,
             target.extraction_date  = source.extraction_date
     WHEN NOT MATCHED THEN
-        INSERT (puuid, game_name, tag_line, summoner_level, profile_icon_id, extraction_date)
+        INSERT (puuid, game_name, tag_line, team, role, extraction_date)
         VALUES (
             source.puuid,
             source.game_name,
             source.tag_line,
-            source.summoner_level,
-            source.profile_icon_id,
+            source.team,
+            source.role,
             source.extraction_date
         )
     """

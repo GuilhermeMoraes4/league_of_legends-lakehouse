@@ -8,7 +8,7 @@
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, expr, explode, from_json, greatest, lit
+from pyspark.sql.functions import col, explode, from_json, greatest, lit, row_number
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -18,6 +18,7 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
+from pyspark.sql.window import Window
 
 # COMMAND ----------
 
@@ -178,6 +179,10 @@ spark.sql(
 # COMMAND ----------
 
 # View temporaria para o MERGE
+# Deduplicacao: manter apenas a extracao mais recente por PK
+window_dedup = Window.partitionBy("match_id", "puuid").orderBy(col("extraction_date").desc())
+df_silver = df_silver.withColumn("rn", row_number().over(window_dedup)).filter(col("rn") == 1).drop("rn")
+
 df_silver.createOrReplaceTempView("match_participants_updates")
 
 # MERGE idempotente: upsert por (match_id, puuid)
